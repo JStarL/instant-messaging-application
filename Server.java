@@ -5,6 +5,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.HashMap;
 
 public class Server {
 
@@ -16,6 +17,8 @@ public class Server {
 
     private static String credentialsFile;
     private static ArrayList<User> users;
+    
+    private static ArrayList<HashMap<String, String>> onlineHistory;
 
     public Server() {
         //
@@ -54,6 +57,8 @@ public class Server {
         
         loadCredentialsFile();
         
+        onlineHistory = new ArrayList<HashMap<String, String>>();
+
         Server mainServer = null;
         mainServer = new Server();
     }
@@ -65,7 +70,7 @@ public class Server {
         Iterator<String> credIterator = credentials.iterator();
 
         printDebug("Loading Credentials File...");
-        
+
         while (credIterator.hasNext()) {
             String userCredentials = credIterator.next();
             String[] userAndPword = userCredentials.split(" ");
