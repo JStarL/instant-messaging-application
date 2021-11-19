@@ -111,12 +111,33 @@ public class MessageMapParser {
 
         msg += ">";
 
-        msg += map.get("body");
+        String body = map.get("body");
+        if (body != null) {
+            msg += body;
+        }
 
         msg += "</" + map.get("tag") + ">";
 
         return msg;
 
+    }
+
+    public HashMap<String, String> mapClone(HashMap<String, String> map) {
+        if (map == null) {
+            return null;
+        }
+
+        HashMap<String, String> mapClone = new HashMap<String, String>();
+
+        Iterator<String> mapKeysIterator = map.keySet().iterator();
+
+        while (mapKeysIterator.hasNext()) {
+            String key = mapKeysIterator.next();
+
+            mapClone.put(key, map.get(key));
+        }
+
+        return mapClone;
     }
 
     public void printHashMap(HashMap<String, String> map) {
