@@ -10,6 +10,13 @@ public class User {
     private boolean blocked;
     
     private ArrayList<String> blockedUsers;
+
+    /**
+     * Types of jobs:
+     * Messages -> single user
+     * Broadcasts
+     * Presence Notifications -> logged in / out
+     */
     private ArrayList<HashMap<String, String>> jobs;
 
     public User() {
@@ -96,6 +103,22 @@ public class User {
         return false;
     }
 
+    public boolean isUserBlocked(String targetUser) {
+        if (targetUser == null || targetUser == "") {
+            return false;
+        }
+
+        for (int i = 0; i < blockedUsers.size() ; i++) {
+            if (blockedUsers.get(i).equals(targetUser)) {
+                // targetUser is blocked
+                return true;
+            }
+        }
+
+        // targetUser not blocked
+        return false;
+    }
+
     public boolean appendJob(HashMap<String, String> job) {
         if (job != null) {
             jobs.add(job);
@@ -113,5 +136,41 @@ public class User {
         } else {
             return null;
         }
+    }
+
+    public int removeOnlineOnlyJobs() {
+        /**
+         * Removes:
+         *  Broadcasts
+         *  Presence Notifications -> Logged in, Logged Out
+         * Keeps:
+         *  Messages to a single user
+         */
+
+        int currSize = jobs.size();
+
+        int i = 0;
+        while (i < currSize) {
+            HashMap<String, String> currMap = jobs.get(i);
+
+            String tagType = currMap.get("tag");
+
+            if (tagType.equals("log")) {
+                jobs.remove(i);
+                currSize--;
+                continue;
+            } else if (tagType.equals("msg")) {
+
+                if (currMap.get("type").equals("all")) {
+                    jobs.remove(i);
+                    currSize--;
+                    continue;
+                }
+            }
+
+            i++;
+        }
+
+        return i;
     }
 }
