@@ -19,6 +19,8 @@ public class User {
      */
     private ArrayList<HashMap<String, String>> jobs;
 
+    private long timeoutTime;
+    
     public User() {
     
         username = "";
@@ -30,6 +32,7 @@ public class User {
         blockedUsers = new ArrayList<String>();
         jobs = new ArrayList<HashMap<String, String>>();
 
+        timeoutTime = System.currentTimeMillis();
     }    
 
     public User(String username, String password) {
@@ -71,6 +74,14 @@ public class User {
         this.blocked = blocked;
     }
     
+    public long getTimeoutTime() {
+        return timeoutTime;
+    }
+
+    public void setTimeoutTime(long timeoutTime) {
+        this.timeoutTime = timeoutTime;
+    }
+
     public boolean addBlockedUser(String blockedUser) {
         if (blockedUser == null || blockedUser == "") {
             return false;
@@ -173,4 +184,5 @@ public class User {
 
         return i;
     }
+
 }
