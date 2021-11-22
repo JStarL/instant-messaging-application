@@ -5,6 +5,7 @@ public class User {
 
     private String username;
     private String password;
+
     
     private boolean loggedIn;
     private boolean blocked;
@@ -20,6 +21,7 @@ public class User {
     private ArrayList<HashMap<String, String>> jobs;
 
     private long timeoutTime;
+    private int mainPort;
     
     public User() {
     
@@ -33,6 +35,7 @@ public class User {
         jobs = new ArrayList<HashMap<String, String>>();
 
         timeoutTime = System.currentTimeMillis();
+        mainPort = -1;
     }    
 
     public User(String username, String password) {
@@ -80,6 +83,22 @@ public class User {
 
     public void setTimeoutTime(long timeoutTime) {
         this.timeoutTime = timeoutTime;
+    }
+
+    public boolean isPastTimeoutTime() {
+        if (System.currentTimeMillis() >= timeoutTime) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    public int getMainPort() {
+        return mainPort;
+    }
+
+    public void setMainPort(int mainPort) {
+        this.mainPort = mainPort;
     }
 
     public boolean addBlockedUser(String blockedUser) {
@@ -166,12 +185,14 @@ public class User {
 
             String tagType = currMap.get("tag");
 
-            if (tagType.equals("log")) {
+            // Presence Notification
+            if (tagType.equals("login") || tagType.equals("logout")) {
                 jobs.remove(i);
                 currSize--;
                 continue;
             } else if (tagType.equals("msg")) {
 
+                // Broadcast
                 if (currMap.get("type").equals("all")) {
                     jobs.remove(i);
                     currSize--;
