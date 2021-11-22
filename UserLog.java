@@ -65,7 +65,7 @@ public class UserLog {
             return false;
         }
 
-        Timestamp timeSince = new Timestamp(now.getTime() - since);
+        Timestamp timeSince = new Timestamp(now.getTime() - (1000L * since));
 
         if (timeSince.compareTo(login) <= 0) {
             return true;
