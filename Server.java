@@ -90,6 +90,17 @@ public class Server implements Runnable {
         return null;
     }
 
+    private static User getUserByPort(int port) {
+
+        for (int i = 0; i < users.size(); i++) {
+            if (users.get(i).getMainPort() == port) {
+                return users.get(i);
+            }
+        }
+
+        return null;
+    }
+
     public static void main(String[] args) throws NumberFormatException, IOException {
 
         if (args.length < 3) {
@@ -184,10 +195,6 @@ public class Server implements Runnable {
 
                 break;
 
-            case "":
-                
-                break;
-
             default:
                 break;
         }
@@ -224,6 +231,8 @@ public class Server implements Runnable {
                 continue;
             }
             
+            previousMap = mmParser.mapClone(recvdMap);
+            
             boolean goodMsg = false;
 
             if (recvdMap.get("tag").equals("thread") &&
@@ -236,14 +245,28 @@ public class Server implements Runnable {
                     goodMsg = true;
                 } else if (clientThreadType.equals("read")) {
                     threadType = "server-write";
-                    goodMsg = true;
+                    
+                    if (recvdMap.containsKey("mainPort")) {
+                        int clientWritePort = Integer.parseInt(recvdMap.get("mainPort"));
+
+                        clientUser = getUserByPort(clientWritePort);
+
+                        if (clientUser != null) {
+                            this.username = clientUser.getUsername();
+                            this.userIndex = indexOfUser(this.username);
+                            recvdMap.put("user", this.username);
+                            goodMsg = true;
+                        } else {
+                            recvdMap.put("invalid", "port");
+                        }
+                    }
+                    
                 } 
                 
             }
 
             printDebug("The thread type is: " + threadType);
             
-            previousMap = mmParser.mapClone(recvdMap);
 
             recvdMap.remove("client");
 
@@ -369,7 +392,7 @@ public class Server implements Runnable {
 
             if (!responseMap.containsKey("missing") &&
             !responseMap.containsKey("invalid")) {
-                clientUser.setTimeoutTime(System.currentTimeMillis() + timeout);
+                clientUser.setTimeoutTime(System.currentTimeMillis() + (1000L * timeout));
             }
 
         }
@@ -418,6 +441,7 @@ public class Server implements Runnable {
             HashMap<String, String> loginJob = new HashMap<String, String>();
         
             loginJob.put("tag", "login");
+            loginJob.put("body", null);
             loginJob.put("user", this.username);
 
             for (User eachUser : users) {
@@ -444,6 +468,8 @@ public class Server implements Runnable {
 
             clientUser.setLoggedIn(false);
             responseMap.put("status", "done");
+
+            clientUser.setMainPort(-1);
             
             // 2) Presence Notification - Log Out
 
@@ -465,7 +491,7 @@ public class Server implements Runnable {
 
             }
 
-            responseMap.remove("user", this.username);
+            // responseMap.remove("user", this.username);
 
             // 3) update Online History
 
@@ -593,9 +619,12 @@ public class Server implements Runnable {
                 }
             }
 
-            String onlineUserString = String.join(" ", usersOnlineNow);
+            String onlineUserString = null;
+            if (usersOnlineNow.size() > 0) {
+                onlineUserString = String.join(" ", usersOnlineNow);
+            }
 
-            responseMap.replace("body", onlineUserString);
+            responseMap.put("body", onlineUserString);
 
         } else if (msgType.equals("since")) {
             
@@ -637,9 +666,12 @@ public class Server implements Runnable {
                 }
             }
 
-            String onlineUserString = String.join(" ", usersOnlineSince);
+            String onlineUserString = null;
+            if (usersOnlineSince.size() > 0) {
+                onlineUserString = String.join(" ", usersOnlineSince);
+            }
 
-            responseMap.replace("body", onlineUserString);
+            responseMap.put("body", onlineUserString);
 
         } else {
             responseMap.put("invalid", "type");
@@ -698,6 +730,8 @@ public class Server implements Runnable {
 
         String username = null;
 
+        conn.setSoTimeout(0);
+
         int tryNum = 0;
         for (int i = 0; i < maxSendNumber; i++) {
             
@@ -710,7 +744,7 @@ public class Server implements Runnable {
                 continue;
             }
             
-            printDebug("[Round " + i + "]: Received " + recvdMsg);
+            printDebug("Auth: Received " + recvdMsg);
             
             HashMap<String, String> recvdMap;
             
@@ -763,7 +797,7 @@ public class Server implements Runnable {
                 continue;
             }
             
-            printDebug("[Round " + i + "]: Sending " + returnString);
+            printDebug("Auth: Sending " + returnString);
             
             serverWriter.println(returnString);
             serverWriter.flush();
@@ -772,6 +806,8 @@ public class Server implements Runnable {
 
             if (responseMap.get("status").equals("matched") ||
                 responseMap.get("status").equals("registered")) {
+                
+                conn.setSoTimeout(100);
                 return true;
             }
             
@@ -822,20 +858,20 @@ public class Server implements Runnable {
 
                 if (userPos == -1) {
                     // new user
-                    responseMap.replace("status", "new-user");
+                    responseMap.put("status", "new-user");
                     
                 } else {
                     if (users.get(userPos).isLoggedIn()) {
                         // already logged in
-                        responseMap.replace("status", "already-online");
+                        responseMap.put("status", "already-online");
                         
                     } else if (users.get(userPos).isBlocked()) {
                         // user is Blocked
-                        responseMap.replace("status", "blocked");
+                        responseMap.put("status", "blocked");
                         
                     } else {
                         // user can log in
-                        responseMap.replace("status", "enter-password");
+                        responseMap.put("status", "enter-password");
 
                     }
                 }
@@ -866,7 +902,8 @@ public class Server implements Runnable {
                     this.clientUser = newUser;
 
                     clientUser.setLoggedIn(true);
-                    clientUser.setTimeoutTime(System.currentTimeMillis() + timeout);
+                    clientUser.setTimeoutTime(System.currentTimeMillis() + (1000L * timeout));
+                    clientUser.setMainPort(conn.getPort());
 
                     responseMap.replace("status", "registered");
 
@@ -880,14 +917,14 @@ public class Server implements Runnable {
                     User tmpUser = getUser(username);
                     
                     if (tryNum >= maxLoginTries) {
-                        responseMap.replace("status", "blocked");
+                        responseMap.put("status", "blocked");
 
                     } else if (tmpUser.isBlocked()) {
-                        responseMap.replace("status", "blocked");
+                        responseMap.put("status", "blocked");
                         
                     } else {
                         if (tmpUser.getPassword().equals(password)) {
-                            responseMap.replace("status", "matched");
+                            responseMap.put("status", "matched");
 
                             this.username = username;
                             this.userIndex = userPos;
@@ -896,13 +933,13 @@ public class Server implements Runnable {
                             clientUser.setLoggedIn(true);
                             clientUser.setBlocked(false);
 
-                            clientUser.setTimeoutTime(System.currentTimeMillis() + timeout);
-
+                            clientUser.setTimeoutTime(System.currentTimeMillis() + (1000L * timeout));
+                            clientUser.setMainPort(conn.getPort());
                             
                         } else {
                             if (tryNum < (maxLoginTries - 1)) {
                                 // more tries left
-                                responseMap.replace("status", "try-again");
+                                responseMap.put("status", "try-again");
                             } else{
                                 // last mismatch - user now blocked
                                 /* 
@@ -910,7 +947,7 @@ public class Server implements Runnable {
                                     and the unblocking after block_duration
                                     by looking for the "status" -> "blocked" entry
                                 */
-                                responseMap.replace("status", "blocked");
+                                responseMap.put("status", "blocked");
 
                             }
 
@@ -929,7 +966,125 @@ public class Server implements Runnable {
     }
 
     private void serverWriterThread() {
-        // user.removeOnlineOnlyJobs()
+        
+        if (clientUser == null) {
+            return;
+        }
+        
+        clientUser.removeOnlineOnlyJobs();
+
+        while (clientUser.isLoggedIn()) {
+            
+            // Timeout Action
+
+            if (clientUser.isPastTimeoutTime()) {
+
+                Timestamp tNow = new Timestamp(System.currentTimeMillis());
+                printDebug("User: " + this.username + "has timed out at " + tNow.toString());
+
+                HashMap<String, String> logoutJob = new HashMap<String, String>();
+
+                logoutJob.put("tag", "logout");
+                logoutJob.put("body", null);
+
+                logoutAction(logoutJob);
+
+                // Send Logout Tag
+
+                String logoutString = null;
+                try {
+                    logoutString = mmParser.convertToMsg(logoutJob);
+                } catch (Exception e) {
+                    printDebug(e.getMessage());
+                }
+                
+                printDebug("Logout: Sending " + logoutString);
+                
+                serverWriter.println(logoutString);
+                serverWriter.flush();
+                
+            } else {
+
+                // Send this user's job from the start of the queue
+
+                HashMap<String, String> nextJob = clientUser.popJob();
+
+                if (nextJob == null) {
+                    
+                    try {
+                        Thread.sleep(100);
+                    } catch (Exception e) {
+                        printDebug("Server-Writer Interrupted");
+                    }
+                    
+                    continue;
+                }
+
+                    
+                HashMap<String, String> previousMap = new HashMap<String, String>();
+            
+                String serverWriterDebugPrompt = "Server-Wrtier [User = " + this.username + "] : ";
+
+                for (int i = 0; i < maxSendNumber; i++) {
+                    
+                    
+                    String jobString = null;
+                    try {
+                        jobString = mmParser.convertToMsg(nextJob);
+                    } catch (Exception e) {
+                        printDebug(e.getMessage());
+                    }
+                    
+                    printDebug(serverWriterDebugPrompt + "Sending " + jobString);
+                    
+                    serverWriter.println(jobString);
+                    serverWriter.flush();
+
+
+                    String recvdMsg = null;
+                    try {
+                        recvdMsg = serverReader.readLine();
+                    } catch (SocketTimeoutException e) {
+                        continue;
+                    } catch (IOException e) {
+                        printDebug(e.getMessage());
+                        break;
+                    }
+                    
+                    printDebug(serverWriterDebugPrompt + "Received " + recvdMsg);
+                    
+                    HashMap<String, String> recvdMap;
+
+                    try {
+                        recvdMap = mmParser.parseMessage(recvdMsg);
+                    } catch (Exception e) {
+                        continue;
+                    }
+
+                    if (recvdMap.equals(previousMap)) {
+                        continue;
+                    }
+                    
+                    previousMap = recvdMap;
+
+                    if (recvdMap.containsKey("status") && recvdMap.get("status").equals("recvd")) {
+                        // setup complete
+                        break;
+                    }
+
+
+                }
+
+                try {
+                    Thread.sleep(100);
+                } catch (Exception e) {
+                    printDebug("Server-Writer Interrupted");
+                }
+
+            }
+        }
+
+
     }
 
     private static void printDebug(String msg) {
