@@ -207,7 +207,7 @@ public class Server implements Runnable {
         serverWriter = new PrintWriter(conn.getOutputStream());
         serverReader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
 
-        HashMap<String, String> previousMap = new HashMap<String, String>();
+        // HashMap<String, String> previousMap = new HashMap<String, String>();
 
         for (int i = 0; i < maxSendNumber; i++) {
             String recvdMsg = null;
@@ -227,11 +227,11 @@ public class Server implements Runnable {
                 continue;
             }
             
-            if (recvdMap.equals(previousMap)) {
-                continue;
-            }
+            // if (recvdMap.equals(previousMap)) {
+            //     continue;
+            // }
             
-            previousMap = mmParser.mapClone(recvdMap);
+            // previousMap = mmParser.mapClone(recvdMap);
             
             boolean goodMsg = false;
 
@@ -322,7 +322,7 @@ public class Server implements Runnable {
             loginNotifyAction();
         }
 
-        HashMap<String, String> previousMap = new HashMap<String, String>();
+        // HashMap<String, String> previousMap = new HashMap<String, String>();
 
         String serverReaderDebugPrompt = "Server-Reader [User = " + this.username + "] : ";
         while (clientUser.isLoggedIn()) {
@@ -351,11 +351,11 @@ public class Server implements Runnable {
                 continue;
             }
             
-            if (recvdMap.equals(previousMap)) {
-                continue;
-            }
+            // if (recvdMap.equals(previousMap)) {
+            //     continue;
+            // }
             
-            previousMap = mmParser.mapClone(recvdMap);
+            // previousMap = mmParser.mapClone(recvdMap);
 
             // 2) Create Response
 
@@ -418,9 +418,16 @@ public class Server implements Runnable {
                 blockAction(recvdMap, responseMap);
             break;
 
+            case "private":
+                privateAction(recvdMap, responseMap);
+            break;
+
             case "logout":
                 logoutAction(responseMap);
-                
+            break;
+
+            case "update":
+                updateAction(responseMap);
             break;
 
 
@@ -432,6 +439,13 @@ public class Server implements Runnable {
 
         return responseMap;
 
+    }
+
+    private void updateAction(HashMap<String, String> responseMap) {
+        if (responseMap != null) {
+            Timestamp now = new Timestamp(System.currentTimeMillis());
+            responseMap.put("currentTime", now.toString());
+        }
     }
 
     private void loginNotifyAction() {
@@ -477,11 +491,14 @@ public class Server implements Runnable {
 
             for (User eachUser : users) {
                 
-                if (eachUser.getUsername().equals(this.username)) {
+                String eachUserName = eachUser.getUsername();
+
+                if (eachUserName.equals(this.username)) {
                     continue;
                 }
 
-                if (clientUser.isUserBlocked(eachUser.getUsername())) {
+                if (clientUser.isUserBlocked(eachUserName) &&
+                    !eachUserName.equals(clientUser.getPrivatePartner())) {
                     continue;
                 }
 
@@ -587,6 +604,135 @@ public class Server implements Runnable {
         }
 
 
+    }
+
+    private void privateAction(HashMap<String, String> recvdMap, HashMap<String, String> responseMap) {
+
+        if (!recvdMap.containsKey("type")) {
+            responseMap.put("missing", "type");
+            return;
+        }
+
+        if (!recvdMap.containsKey("user")) {
+            responseMap.put("missing", "user");
+            return;
+        }
+
+        String targetUsername = recvdMap.get("user");
+
+        User targetUser = getUser(targetUsername);
+
+        if (targetUser == null) {
+            responseMap.put("privateStatus", "no-such-user");
+            return;
+        } else if (this.username.equals(targetUsername)) {
+            responseMap.put("privateStatus", "self");
+            return;
+        } else if (!targetUser.isLoggedIn()) {
+            responseMap.put("privateStatus", "offline");
+            return;
+        }
+
+        String msgType = recvdMap.get("type");
+        if (msgType.equals("start")) {
+            
+            if (!recvdMap.containsKey("mode")) {
+                responseMap.put("missing", "mode");
+                return;
+            }
+
+            String startMode = recvdMap.get("mode");
+
+            if (startMode.equals("initiate")) {
+                
+                if (targetUser.isUserBlocked(this.username)) {
+                    responseMap.put("privateStatus", "blocked");
+                    return;
+                }
+
+                recvdMap.put("fromUser", this.username);
+
+                targetUser.appendJob(recvdMap);
+
+                for (int i = 0; i < 30; i++) {
+                    
+                    try {
+                        Thread.sleep(500);
+                    } catch (Exception e) {
+                        break;
+                    }
+
+                    HashMap<String, String> p2pResponseMap = clientUser.getP2pMap();
+
+                    if (p2pResponseMap != null) {
+
+                        String p2pResponseString = p2pResponseMap.get("mode");
+
+                        if (p2pResponseString.equals("accept")) {
+                            
+                            // Set p2p usernames for each client
+
+                            clientUser.setPrivatePartner(targetUsername);
+                            
+                            targetUser.setPrivatePartner(this.username);
+
+                            // Prepare the Response
+
+                            responseMap.put("privateStatus", "accepted");
+
+                            String listeningPort = "-1";
+
+                            if (p2pResponseMap.containsKey("listeningPort")) {
+                                
+                                listeningPort = p2pResponseMap.get("listeningPort");
+   
+                            }
+                            
+                            responseMap.put("listeningPort", listeningPort);
+
+                        } else if (p2pResponseString.equals("decline")) {
+                            responseMap.put("privateStatus", "declined");
+
+                        }
+
+                        clientUser.setP2pMap(null);
+
+                        return;
+
+                    }
+
+                }
+
+                responseMap.put("privateStatus", "timed-out");
+                
+            } else if (startMode.equals("accept") ||
+                startMode.equals("decline")) {
+                
+                recvdMap.put("fromUser", this.username);
+                
+                targetUser.setP2pMap(recvdMap);
+                
+                responseMap.put("privateStatus", "sent-response");
+
+            } else {
+                responseMap.put("invalid", "mode");
+            }
+
+
+
+        } else if (msgType.equals("stop")) {
+            
+            recvdMap.put("user", this.username);
+
+            targetUser.appendJob(recvdMap);
+
+            responseMap.put("privateStatus", "sent-stop");
+
+            clientUser.setPrivatePartner(null);
+                            
+            targetUser.setPrivatePartner(null);
+
+        } 
     }
 
     private void onlineHistoryAction(HashMap<String, String> recvdMap, HashMap<String, String> responseMap) {
@@ -696,6 +842,13 @@ public class Server implements Runnable {
             return;
         }
 
+        User userToBlock = getUser(targetUser);
+
+        if (userToBlock == null) {
+            responseMap.put("blockStatus", "no-such-user");
+            return;
+        }
+
         if (msgType.equals("on")) {
             
             boolean blockSuccess = clientUser.addBlockedUser(targetUser);
@@ -726,7 +879,7 @@ public class Server implements Runnable {
 
     private boolean userAuthAction() throws IOException, InterruptedException {
 
-        HashMap<String, String> previousMap = new HashMap<String, String>();
+        // HashMap<String, String> previousMap = new HashMap<String, String>();
 
         String username = null;
 
@@ -754,10 +907,12 @@ public class Server implements Runnable {
                 continue;
             }
             
-            if (recvdMap.equals(previousMap)) {
-                continue;
-            }
+            // if (recvdMap.equals(previousMap)) {
+            //     continue;
+            // }
             
+            // previousMap = mmParser.mapClone(recvdMap);
+
             // 2) Create Response
 
             //boolean goodMsg = false;
@@ -785,7 +940,6 @@ public class Server implements Runnable {
                 tryNum++;
             }
 
-            previousMap = mmParser.mapClone(recvdMap);
             
             // 4) Send Response
 
@@ -1021,7 +1175,7 @@ public class Server implements Runnable {
                 }
 
                     
-                HashMap<String, String> previousMap = new HashMap<String, String>();
+                // HashMap<String, String> previousMap = new HashMap<String, String>();
             
                 String serverWriterDebugPrompt = "Server-Wrtier [User = " + this.username + "] : ";
 
@@ -1061,11 +1215,11 @@ public class Server implements Runnable {
                         continue;
                     }
 
-                    if (recvdMap.equals(previousMap)) {
-                        continue;
-                    }
+                    // if (recvdMap.equals(previousMap)) {
+                    //     continue;
+                    // }
                     
-                    previousMap = recvdMap;
+                    // previousMap = recvdMap;
 
                     if (recvdMap.containsKey("status") && recvdMap.get("status").equals("recvd")) {
                         // setup complete

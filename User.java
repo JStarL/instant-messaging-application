@@ -12,6 +12,7 @@ public class User {
     
     private ArrayList<String> blockedUsers;
 
+    
     /**
      * Types of jobs:
      * Messages -> single user
@@ -19,6 +20,9 @@ public class User {
      * Presence Notifications -> logged in / out
      */
     private ArrayList<HashMap<String, String>> jobs;
+    
+    private HashMap<String, String> p2pMap;
+    private String privatePartner;
 
     private long timeoutTime;
     private int mainPort;
@@ -33,6 +37,8 @@ public class User {
 
         blockedUsers = new ArrayList<String>();
         jobs = new ArrayList<HashMap<String, String>>();
+        p2pMap = null;
+        privatePartner = null;
 
         timeoutTime = System.currentTimeMillis();
         mainPort = -1;
@@ -99,6 +105,22 @@ public class User {
 
     public void setMainPort(int mainPort) {
         this.mainPort = mainPort;
+    }
+
+    public HashMap<String, String> getP2pMap() {
+        return p2pMap;
+    }
+
+    public void setP2pMap(HashMap<String, String> p2pMap) {
+        this.p2pMap = p2pMap;
+    }
+
+    public String getPrivatePartner() {
+        return privatePartner;
+    }
+
+    public void setPrivatePartner(String privatePartner) {
+        this.privatePartner = privatePartner;
     }
 
     public boolean addBlockedUser(String blockedUser) {

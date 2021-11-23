@@ -2,6 +2,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
@@ -23,6 +24,13 @@ public class Client implements Runnable {
 
     private static String username;
     private static boolean isLoggedIn;
+
+    private static ServerSocket privateReceivingSocket;
+    private static Socket privateConn;
+    private static Thread privateConnReaderThread;
+    private static String currPrivateParter;
+    private static int remotePrivatePort;
+    private static PrintWriter privateWriter;
 
     private String threadType;
     private static boolean clientSenderThreadAlive;
@@ -74,6 +82,7 @@ public class Client implements Runnable {
 
         serverName = "localhost";
         maxSendNumber = 10;
+        currPrivateParter = null;
         
         terminalReader = new BufferedReader(new InputStreamReader(System.in));
         userInputs = new ArrayList<String>();
@@ -120,9 +129,39 @@ public class Client implements Runnable {
                 return;
             }
             
-            case "p2p":
+            break;
+
+            case "p2p-sender":
+            
+            try {
+                Thread.sleep(100);
+
+                privateConn = new Socket("localhost", remotePrivatePort);
+            } catch (Exception e) {
+                printDebug(e.getMessage());
+            }
+
+            readPrivateConn();
+            
+            
+            break;
+            
+            case "p2p-receiver":
+            
+            try {
+                privateConn = privateReceivingSocket.accept();
                 
-                break;
+                remotePrivatePort = privateConn.getPort();
+
+            } catch (Exception e) {
+                
+                printDebug("In Run method: " + e.getMessage());
+            }
+            
+            readPrivateConn();
+            
+            
+            break;
 
             default:
                 return;
@@ -142,6 +181,65 @@ public class Client implements Runnable {
 
     }
 
+    private void readPrivateConn() {
+
+        BufferedReader privateConnReader = null;
+        
+        
+        try {
+            privateConnReader = new BufferedReader(new InputStreamReader(privateConn.getInputStream()));
+            privateWriter = new PrintWriter(privateConn.getOutputStream());
+            privateConn.setSoTimeout(100);
+        } catch (Exception e) {
+            printDebug("In read Private Conn Method" + e.getMessage());
+        }
+        
+        if (privateConnReader == null) {return;}
+
+        String originalPrivatePartner = currPrivateParter;
+
+        while (!Thread.interrupted() && isLoggedIn && (currPrivateParter == originalPrivatePartner)) {
+            
+            try {
+                if (privateConnReader.ready()) {
+                    printTerminal(currPrivateParter + "[private]: " +
+                    privateConnReader.readLine());
+                } else {
+                    try {
+                        Thread.sleep(100);
+                    } catch (InterruptedException e) {
+                        break;
+                    }
+                }
+                
+            } catch (Exception e) {
+                printDebug(e.getMessage());
+            }
+        }
+        
+        privateConnReaderThread = null;
+
+        privateWriter.close();
+        privateWriter = null;
+
+        try {
+
+        privateConnReader.close();
+
+        privateConn.close();
+
+
+        if (privateReceivingSocket != null) {
+            privateReceivingSocket.close();
+            privateReceivingSocket = null;
+        }
+
+        } catch (Exception e) {
+            printDebug(e.getMessage());
+        }
+        
+    }
+    
     private void clientSenderThread() throws IOException, Exception {
         
         if (!initialiseThread()) {throw new Exception("Thread Initialisation Error");}
@@ -191,6 +289,8 @@ public class Client implements Runnable {
         // Start Checking for inputs from the user
 
         //printDebug("UserInputs Size: " + userInputs.size());
+
+        String startingPrivateSessionMode = null;
 
         while (isLoggedIn) {
             
@@ -330,6 +430,111 @@ public class Client implements Runnable {
                     
                 break;
 
+                case "startprivate":
+
+                args = userInput.split(" ");
+
+                if (args.length < 2) {
+                    printTerminal("startprivate usage: startprivate <user> [accept/decline]");
+                    continue;
+                }
+
+                if (username.equals(args[1])) {
+                    printTerminal("Can't start a p2p session with self");
+                    continue;
+                }
+
+                startingPrivateSessionMode = null;
+                if (args.length == 2) {
+                    startingPrivateSessionMode = "initiate";
+                } else {
+                    if (args[2].equals("accept")) {
+                        startingPrivateSessionMode = "accept";
+
+                        privateReceivingSocket = new ServerSocket(0);
+
+                    } else {
+                        startingPrivateSessionMode = "decline";
+                        currPrivateParter = null;
+                    }
+                }
+
+                userRequest.put("tag", "private");
+                userRequest.put("type", "start");
+                userRequest.put("mode", startingPrivateSessionMode);
+                userRequest.put("user", args[1]);
+                userRequest.put("body", null);
+
+                // Wait some time for a response from the other user
+                
+                if (startingPrivateSessionMode.equals("initiate")) {
+                    conn.setSoTimeout(18 * 1000);
+    
+                } else if (startingPrivateSessionMode.equals("accept")) {
+                    userRequest.put("listeningPort", Integer.toString(privateReceivingSocket.getLocalPort()));
+                }
+
+                break;
+
+                case "private":
+
+                args = userInput.split(" ", 3);
+
+                if (args.length < 3) {
+                    printTerminal("private usage: private <user> <message>");
+                    continue;
+                }
+
+                String privateTargetUser = args[1];
+
+                if (currPrivateParter == null) {
+                    printTerminal("You have not started a private session with " + privateTargetUser +
+                    " - can't send a message\n");
+                    continue;
+                }
+                if (!currPrivateParter.equals(privateTargetUser)) {
+                    printTerminal("Can't start a private message to " + privateTargetUser +
+                    " - already in a private session with " + currPrivateParter);
+                    continue;
+                }
+
+                String privateMsg = args[2];
+
+                if (privateWriter != null) {
+                    privateWriter.println(privateMsg);
+                    privateWriter.flush();
+                }
+
+                userRequest.put("tag", "update");
+                userRequest.put("body", null);
+
+                break;
+
+                case "stopprivate":
+
+                args = userInput.split(" ");
+
+                if (args.length < 2 || args[1] == null) {
+                    printTerminal("stopprivate usage: stopprivate <user>");
+                    continue;
+                }
+
+                String stopPrivateUsername = args[1];
+
+                if (!stopPrivateUsername.equals(currPrivateParter)) {
+                    printTerminal("Can't stop a private session with " + stopPrivateUsername +
+                    " - currently in a private session with " + currPrivateParter);
+                    continue;
+                }
+
+                userRequest.put("tag", "private");
+                userRequest.put("type", "stop");
+                userRequest.put("user", currPrivateParter);
+                userRequest.put("body", null);
+
+                break;
+
+
                 case "logout":
 
                 userRequest.put("tag", "logout");
@@ -367,6 +572,12 @@ public class Client implements Runnable {
             } catch (SocketTimeoutException e) {
                 printTerminal("The command did not receive a response from the server" +
                     " - please try again");
+
+                if (startingPrivateSessionMode.equals("initiate")) {
+                    conn.setSoTimeout(100);
+                    startingPrivateSessionMode = null;
+                }
+
                 continue;
             }
             
@@ -465,9 +676,126 @@ public class Client implements Runnable {
                 } else if (blockStatus.equals("false-already")) {
                     printTerminal(blockUser + " has already been " + blockType);
 
+                } else if (blockStatus.equals("no-such-user")) {
+                    printTerminal(blockUser + " does not exist - cannot be " + blockType);
+
                 } else if (blockStatus.equals("true")) {
                     printTerminal(blockUser + " has been " + blockType);
 
+                }
+
+                break;
+
+                case "private":
+
+                String privateStatus = recvdMap.get("privateStatus");
+
+                switch (privateStatus) {
+                    case "self":
+
+                    printTerminal("Can't start a private session with self");
+                        
+                    break;
+
+                    case "no-such-user":
+
+                    printTerminal("Can't start a private session with " + recvdMap.get("user") +
+                    " - user does not exist");
+                        
+                    break;
+
+                    case "offline":
+
+                    printTerminal("Can't start a private session with " + recvdMap.get("user") +
+                    " - user is currently offline, please try again later");
+
+                    break;
+
+                    case "blocked":
+                        
+                    printTerminal("Can't start a private session with " + recvdMap.get("user") +
+                    " - this user has currently blocked you, please try again later");
+
+                    break;
+
+                    case "accepted":
+
+                    printTerminal("Your private messaging request has been accepted by " + recvdMap.get("user"));
+
+                    if (startingPrivateSessionMode.equals("initiate")) {
+                        conn.setSoTimeout(100);
+                        startingPrivateSessionMode = null;
+                    }
+
+                    currPrivateParter = recvdMap.get("user");
+
+                    try {
+                        remotePrivatePort = Integer.parseInt(recvdMap.get("listeningPort"));
+                    } catch (Exception e) {
+                        printDebug(e.getMessage());
+                        remotePrivatePort = -1;
+                    }
+
+                    Client p2pSender = new Client("p2p-sender");
+
+                    privateConnReaderThread = new Thread(p2pSender);
+
+                    privateConnReaderThread.start();
+                    
+                    break;
+                    
+                    case "declined":
+                    
+                    printTerminal("Your private messaging request has been declined by " + recvdMap.get("user"));
+
+                    break;
+
+                    case "timed-out":
+
+                    printTerminal("Your private messaging request has timed out, please try again later");
+                    
+                    break;
+
+                    case "sent-response":
+                    
+                    printTerminal("Your response to the private session request has been sent");
+
+                    if (startingPrivateSessionMode.equals("accept")) {
+
+                        currPrivateParter = recvdMap.get("user");
+
+                        Client p2pReceiver = new Client("p2p-receiver");
+
+                        privateConnReaderThread = new Thread(p2pReceiver);
+
+                        privateConnReaderThread.start();
+
+                    } else if (startingPrivateSessionMode.equals("decline")) {
+
+                        currPrivateParter = null;
+
+                    }
+                    
+                    break;
+                
+                    case "sent-stop":
+
+                    printTerminal("Your private session with " + recvdMap.get("user") + " has been ended");
+
+                    String stopPrivatePartner = recvdMap.get("user");
+
+                    if (stopPrivatePartner.equals(currPrivateParter)) {
+
+                        privateConnReaderThread.interrupt();
+
+                        currPrivateParter = null;
+
+                    }
+
+                    break;
+
+                    default:
+                    break;
                 }
 
                 break;
@@ -480,6 +808,12 @@ public class Client implements Runnable {
                     printTerminal("You have been logged out");
                     isLoggedIn = false;
                     clientSenderThreadAlive = false;
+
+                    if (currPrivateParter != null) {
+                        privateConnReaderThread.interrupt();
+
+                        currPrivateParter = null;
+                    }
 
                     return;
                 }
@@ -758,6 +1092,37 @@ public class Client implements Runnable {
                 
                 break;
                 
+                case "private":
+
+                String privateType = recvdMap.get("type");
+
+                if (privateType.equals("start")) {
+                    currPrivateParter = recvdMap.get("fromUser");
+
+                    printTerminal(currPrivateParter + " wants to initiate a p2p session with you.\n" + 
+                    "If you wish to accept, please type `startprivate " + currPrivateParter + " accept`\n" +
+                    "Or if you wish to decline, type `startprivate " + currPrivateParter + " decline`"
+                    );
+                } else if (privateType.equals("stop")) {
+
+                    String stopPrivatePartner = recvdMap.get("user");
+
+                    
+                    if (stopPrivatePartner.equals(currPrivateParter)) {
+                        
+                        printTerminal("Your private session with " + currPrivateParter + " has been ended");
+
+                        privateConnReaderThread.interrupt();
+
+                        currPrivateParter = null;
+
+                    }
+                }
+
+                
+
+                break;
+
                 case "logout":
                 
                 String userLoggedOut = recvdMap.get("user");
@@ -768,8 +1133,27 @@ public class Client implements Runnable {
                     isLoggedIn = false;
                     clientReaderThreadAlive = false;
 
+                    if (currPrivateParter != null) {
+                        privateConnReaderThread.interrupt();
+
+                        currPrivateParter = null;
+                    }
+
                 } else {
+                    
                     printTerminal(userLoggedOut + " has just logged out");
+                    
+                    if (currPrivateParter != null &&
+                        userLoggedOut.equals(currPrivateParter)) {
+                        
+                        printTerminal("The private session with " + currPrivateParter +
+                        " has just been closed");
+
+                        privateConnReaderThread.interrupt();
+
+                        currPrivateParter = null;
+                    }
+                    
                 }
 
                 break;
